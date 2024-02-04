@@ -112,7 +112,6 @@ def signup():
     
     if request.method == 'POST':
         u = new_user()
-        print("u")
         print(u)
         for key in u.keys():
             print(f'{key}: {u[key]}')
@@ -130,7 +129,6 @@ def profile():
     user = get_user_from_cookie(request)
     if user:
         return render_with_error_handling('profile.html', user=user)
-    
     redirect('/login')
 
 
@@ -143,13 +141,13 @@ def login():
         return redirect('/')
     
     if request.method == 'POST':
-        name = request.form['name']
-        password = request.form['name']
+        name = request.form['username']
+        password = request.form['password']
         u = query_db('select * from users where name = ? and password = ?', [name, password], one=True)
-        if user:
+        if u:
             resp = make_response(redirect("/"))
-            resp.set_cookie('user_id', u.id)
-            resp.set_cookie('user_password', u.password)
+            resp.set_cookie('user_id', str(u['id']))
+            resp.set_cookie('user_password', u['password'])
             return resp
 
     return render_with_error_handling('login.html', failed=True)   
@@ -165,7 +163,6 @@ def logout():
 def room(room_id):
     user = get_user_from_cookie(request)
     if user is None: return redirect('/')
-
     room = query_db('select * from rooms where id = ?', [room_id], one=True)
     return render_with_error_handling('room.html',
             room=room, user=user)
@@ -173,14 +170,105 @@ def room(room_id):
 # -------------------------------- API ROUTES ----------------------------------
 
 # POST to change the user's name
-@app.route('/api/user/name')
+@app.route('/api/user/name', methods=['POST'])
 def update_username():
-    return {}, 403
+    try:
+        user_id = request.json.get('uid')
+        new_username = request.json.get('new_username')
+        query = "UPDATE users SET name = ? WHERE id = ?"
+        parameters = (new_username, user_id)
+        conn = get_db() 
+        cursor = conn.cursor()
+        cursor.execute(query, parameters)
+        conn.commit()
+        conn.close()
 
-# POST to change the user's password
+        return jsonify({'message': 'Username updated successfully'}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/user/password', methods=['POST'])
+def update_password():
+    try:
+        user_id = request.json.get('uid')
+        new_pass = request.json.get('new_password')
+        query = "UPDATE users SET password = ? WHERE id = ?"
+        parameters = (new_pass, user_id)
+        conn = get_db() 
+        cursor = conn.cursor()
+        cursor.execute(query, parameters)
+        conn.commit()
+        conn.close()
+
+        return jsonify({'message': 'Password updated successfully'}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # POST to change the name of a room
+@app.route('/api/rooms/name', methods=['POST'])
+def update_room_name():
+    try:
+        name = request.json.get('name')
+        rId = request.json.get('rid')
+        query = "UPDATE rooms SET name = ? WHERE id = ?"
+        parameters = (name, rId)
+        conn = get_db() 
+        cursor = conn.cursor()
+        cursor.execute(query, parameters)
+        conn.commit()
+        conn.close()
 
-# GET to get all the messages in a room
+        return jsonify({'message': 'Name updated successfully'}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # POST to post a new message to a room
+@app.route('/api/rooms/<int:room_id>/messages', methods=['POST'])
+def post_message(room_id):
+    try:
+        body = request.json.get('body')
+        user_id = request.json.get('uid')
+        if not body:
+            return jsonify({'error': 'Message body cannot be empty'}), 400
+
+        query = "INSERT INTO messages (user_id, room_id, body) VALUES (?, ?, ?)"
+        parameters = (user_id, room_id, body)
+        conn = get_db() 
+        cursor = conn.cursor()
+        cursor.execute(query, parameters)
+        conn.commit()
+        conn.close()
+
+        return jsonify({'message': 'Message posted successfully'}), 201
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+
+# GET to get all the messages in a room
+@app.route('/api/rooms/<int:room_id>/messages', methods=['GET'])
+def get_messages(room_id):
+    try:
+        query = "SELECT messages.id, users.name, messages.room_id, messages.body FROM messages INNER JOIN users ON messages.user_id = users.id WHERE messages.room_id = ?"
+        messages = query_db(query, (room_id,), one=False)
+        messages_list = []
+        if not messages:
+            return messages_list
+
+        for message in messages:
+            message_dict = {
+                'id': message[0],
+                'user_name': message[1],
+                'room_id': message[2],
+                'body': message[3]
+            }
+            messages_list.append(message_dict)
+
+        return jsonify(messages_list)
+    except sqlite3.Error as e:
+        return jsonify({'error': str(e)}), 500
+
